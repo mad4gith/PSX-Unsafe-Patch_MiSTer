@@ -1,0 +1,21 @@
+diff --git a/PSX.sv b/PSX.sv
+index d175945..e321b7e 100644
+--- a/PSX.sv
++++ b/PSX.sv
+@@ -265,6 +265,7 @@ parameter CONF_STR = {
+ 	"P2O[64],Pause when OSD open,On,Off;",
+ 	"P2-;",
+ 	"P2-,(U) = unsafe -> can crash;",
++    "P2O[93],Unsafe Warning,On,Off;",
+ 	"P2O[80:79],Turbo(Cheats Off),Off,Low(U),Medium(U),High(U);",
+ 	"P2O[72],Pause when CD slow,On,Off(U);",
+ 	"P2O[15],PAL 60Hz Hack,Off,On(U);",
+@@ -789,7 +790,7 @@ always @(posedge clk_1x) begin
+       if (!padMode[1]) psx_info <= 8'd18;
+    end else if (cdinfo_download_1 && ~cdinfo_download) begin
+       // warning for every unsafe option
+-      if (status[89] || status[80:79] > 0 || status[72] || status[15] || status[21] || status[77:75] > 0 || status[78] || status[85]) begin
++      if (~status[93] && (status[89] || status[80:79] > 0 || status[72] || status[15] || status[21] || status[77:75] > 0 || status[78] || status[85])) begin
+          psx_info_req <= 1;
+          psx_info     <= 8'd24;
+       end else if (status[40:39] == 2'b00) begin

@@ -1,0 +1,82 @@
+name: Build PSX core (patched)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # controlla ogni giorno alle 6:00 UTC
+  workflow_dispatch:        # bottone "Run workflow" manuale
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # <- necessario per il git push
+    steps:
+      - name: Checkout patch repo
+        uses: actions/checkout@v4
+
+      - name: Get latest upstream commit SHA
+        id: upstream
+        run: |
+          SHA=$(git ls-remote https://github.com/MiSTer-devel/PSX_MiSTer.git HEAD | cut -f1)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Restore last built SHA
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: last-built-sha.txt
+          key: last-built-sha
+
+      - name: Compare and decide
+        id: decide
+        run: |
+          LAST=$(cat last-built-sha.txt 2>/dev/null || echo "none")
+          echo "Ultimo compilato: $LAST"
+          echo "Upstream attuale: ${{ steps.upstream.outputs.sha }}"
+          if [ "$LAST" == "${{ steps.upstream.outputs.sha }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Clone fresh upstream core
+        if: steps.decide.outputs.skip == 'false'
+        run: git clone --depth 1 https://github.com/MiSTer-devel/PSX_MiSTer.git build
+
+      - name: Apply patch
+        if: steps.decide.outputs.skip == 'false'
+        run: |
+          cd build
+          git apply --check ../patches/unsafe-warning-toggle.patch
+          git apply ../patches/unsafe-warning-toggle.patch
+
+      - name: Pull Quartus image
+        if: steps.decide.outputs.skip == 'false'
+        run: docker pull raetro/quartus:17.1
+
+      - name: Compile
+        if: steps.decide.outputs.skip == 'false'
+        run: |
+          docker run --rm -v ${{ github.workspace }}/build:/build -w /build \
+            raetro/quartus:17.1 quartus_sh --flow compile PSX.qpf
+
+      - name: Save new SHA
+        if: steps.decide.outputs.skip == 'false'
+        run: echo "${{ steps.upstream.outputs.sha }}" > last-built-sha.txt
+
+      - name: Upload output
+        if: steps.decide.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PSX_rbf_${{ steps.upstream.outputs.sha }}
+          path: build/output_files/*.rbf
+
+      - name: Commit compiled rbf
+        run: |
+          mkdir -p _Console
+          cp build/output_files/PSX.rbf _Console/PSX.rbf
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add _Console/PSX.rbf
+          git diff --staged --quiet || git commit -m "Update PSX core ($(date +%Y-%m-%d))"
+          git push
