@@ -14,6 +14,20 @@ jobs:
       - name: Checkout patch repo
         uses: actions/checkout@v4
 
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: true
+
+      - name: Check disk space
+        run: df -h
+
       - name: Get latest upstream commit SHA
         id: upstream
         run: |
