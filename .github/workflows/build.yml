@@ -29,26 +29,33 @@ jobs:
       - name: Check disk space
         run: df -h
 
-      - name: Get latest upstream commit SHA
-        id: upstream
+      - name: Get latest official release filename
+        id: latest_release
         run: |
-          SHA=$(git ls-remote https://github.com/MiSTer-devel/PSX_MiSTer.git HEAD | cut -f1)
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          FILENAME=$(curl -s https://api.github.com/repos/MiSTer-devel/PSX_MiSTer/contents/releases \
+            | python3 -c "
+              import sys, json
+              data = json.load(sys.stdin)
+              files = sorted(f['name'] for f in data if f['name'].endswith('.rbf'))
+              print(files[-1])
+              ")
+          echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
+          echo "Ultimo rbf ufficiale: $FILENAME"
 
-      - name: Restore last built SHA
+      - name: Restore last built filename
         id: cache
         uses: actions/cache@v4
         with:
-          path: last-built-sha.txt
-          key: last-built-sha
+          path: last-built-filename.txt
+          key: last-built-filename
 
       - name: Compare and decide
         id: decide
         run: |
-          LAST=$(cat last-built-sha.txt 2>/dev/null || echo "none")
+          LAST=$(cat last-built-filename.txt 2>/dev/null || echo "none")
           echo "Ultimo compilato: $LAST"
-          echo "Upstream attuale: ${{ steps.upstream.outputs.sha }}"
-          if [ "$LAST" == "${{ steps.upstream.outputs.sha }}" ]; then
+          echo "Ultima release ufficiale: ${{ steps.latest_release.outputs.filename }}"
+          if [ "$LAST" == "${{ steps.latest_release.outputs.filename }}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -59,6 +66,7 @@ jobs:
         run: git clone --depth 1 https://github.com/MiSTer-devel/PSX_MiSTer.git build
 
       - name: Apply patch
+        id: apply_patch
         if: steps.decide.outputs.skip == 'false'
         run: |
           cd build
@@ -66,37 +74,31 @@ jobs:
           git apply ../patches/unsafe-warning-toggle.patch
 
       - name: Pull Quartus image
-        if: steps.decide.outputs.skip == 'false'
+        if: steps.decide.outputs.skip == 'false' && steps.apply_patch.outcome == 'success'
         run: docker pull raetro/quartus:17.1
 
       - name: Compile
         id: compile
-        if: steps.decide.outputs.skip == 'false'
+        if: steps.decide.outputs.skip == 'false' && steps.apply_patch.outcome == 'success'
         run: |
           docker run --rm -v ${{ github.workspace }}/build:/build -w /build \
             raetro/quartus:17.1 quartus_sh --flow compile PSX.qpf
-
-      - name: Save new SHA
-        if: steps.decide.outputs.skip == 'false'
-        run: echo "${{ steps.upstream.outputs.sha }}" > last-built-sha.txt
-
-      - name: Upload output
-        if: steps.decide.outputs.skip == 'false'
-        uses: actions/upload-artifact@v4
-        with:
-          name: PSX_rbf_${{ steps.upstream.outputs.sha }}
-          path: build/output_files/*.rbf
 
       - name: Commit compiled rbf
         if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
         run: |
           mkdir -p _Console
-          cp build/output_files/PSX.rbf _Console/PSX.rbf
+          rm -f _Console/PSX*.rbf
+          cp build/output_files/PSX.rbf "_Console/${{ steps.latest_release.outputs.filename }}"
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add _Console/PSX.rbf
-          git diff --staged --quiet || git commit -m "Update PSX core ($(date +%Y-%m-%d))"
+          git add _Console/
+          git diff --staged --quiet || git commit -m "Update PSX core (${{ steps.latest_release.outputs.filename }})"
           git push
+
+      - name: Save new filename
+        if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
+        run: echo "${{ steps.latest_release.outputs.filename }}" > last-built-filename.txt
 
       - name: Build Custom Database for MiSTer Downloader
         if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
@@ -109,14 +111,28 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const outcome = "${{ steps.compile.outcome }}"; // success, failure, cancelled
-            const emoji = outcome === "success" ? "✅" : "❌";
-            const sha = "${{ steps.upstream.outputs.sha }}".substring(0, 7);
+            const patchOutcome = "${{ steps.apply_patch.outcome }}";
+            const compileOutcome = "${{ steps.compile.outcome }}";
+            const filename = "${{ steps.latest_release.outputs.filename }}";
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            let outcome, reason;
+            if (patchOutcome !== "success") {
+              outcome = "failure";
+              reason = "La patch non si applica più correttamente (probabile modifica incompatibile a monte). Serve aggiornare patches/unsafe-warning-toggle.patch.";
+            } else if (compileOutcome !== "success") {
+              outcome = "failure";
+              reason = "La patch si applica correttamente, ma la compilazione con Quartus è fallita.";
+            } else {
+              outcome = "success";
+              reason = "Build completata con successo.";
+            }
+
+            const emoji = outcome === "success" ? "✅" : "❌";
 
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `${emoji} Build PSX core - upstream ${sha} - ${outcome}`,
-              body: `**Esito compilazione:** ${outcome}\n**Commit upstream:** \`${sha}\`\n**Log completo:** ${runUrl}`
+              title: `${emoji} Build PSX core - ${filename} - ${outcome}`,
+              body: `**Esito:** ${reason}\n**Release ufficiale:** \`${filename}\`\n**Log completo:** ${runUrl}`
             });
