@@ -32,13 +32,7 @@ jobs:
       - name: Get latest official release filename
         id: latest_release
         run: |
-          FILENAME=$(curl -s https://api.github.com/repos/MiSTer-devel/PSX_MiSTer/contents/releases \
-            | python3 -c "
-              import sys, json
-              data = json.load(sys.stdin)
-              files = sorted(f['name'] for f in data if f['name'].endswith('.rbf'))
-              print(files[-1])
-              ")
+          FILENAME=$(curl -s https://api.github.com/repos/MiSTer-devel/PSX_MiSTer/contents/releases | python3 -c "import sys, json; data = json.load(sys.stdin); files = sorted(f['name'] for f in data if f['name'].endswith('.rbf')); print(files[-1])")
           echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
           echo "Ultimo rbf ufficiale: $FILENAME"
 
