@@ -22,20 +22,14 @@ jobs:
           echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
           echo "Ultimo rbf ufficiale: $FILENAME"
 
-      - name: Restore last built filename
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: last-built-filename.txt
-          key: last-built-filename
-
-      - name: Compare and decide
+      - name: Compare with existing rbf in repo
         id: decide
         run: |
-          LAST=$(cat last-built-filename.txt 2>/dev/null || echo "none")
-          echo "Ultimo compilato: $LAST"
+          LOCAL_FILE=$(ls _Console/PSX_*.rbf 2>/dev/null | head -n1)
+          LOCAL_NAME=$(basename "${LOCAL_FILE:-none}")
+          echo "File presente nel repo: $LOCAL_NAME"
           echo "Ultima release ufficiale: ${{ steps.latest_release.outputs.filename }}"
-          if [ "$LAST" == "${{ steps.latest_release.outputs.filename }}" ]; then
+          if [ "$LOCAL_NAME" == "${{ steps.latest_release.outputs.filename }}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -91,10 +85,6 @@ jobs:
           git add _Console/
           git diff --staged --quiet || git commit -m "Update PSX core (${{ steps.latest_release.outputs.filename }})"
           git push
-
-      - name: Save new filename
-        if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
-        run: echo "${{ steps.latest_release.outputs.filename }}" > last-built-filename.txt
 
       - name: Build Custom Database for MiSTer Downloader
         if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
