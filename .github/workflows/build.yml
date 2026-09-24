@@ -2,14 +2,15 @@ name: Build PSX core (patched)
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # controlla ogni giorno alle 6:00 UTC
+    - cron: '0 6 * * 1'
   workflow_dispatch:        # bottone "Run workflow" manuale
+
+permissions: write-all
 
 jobs:
   check-and-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write     # <- necessario per il git push
+
     steps:
       - name: Checkout patch repo
         uses: actions/checkout@v4
@@ -69,6 +70,7 @@ jobs:
         run: docker pull raetro/quartus:17.1
 
       - name: Compile
+        id: compile
         if: steps.decide.outputs.skip == 'false'
         run: |
           docker run --rm -v ${{ github.workspace }}/build:/build -w /build \
@@ -86,6 +88,7 @@ jobs:
           path: build/output_files/*.rbf
 
       - name: Commit compiled rbf
+        if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
         run: |
           mkdir -p _Console
           cp build/output_files/PSX.rbf _Console/PSX.rbf
@@ -94,3 +97,26 @@ jobs:
           git add _Console/PSX.rbf
           git diff --staged --quiet || git commit -m "Update PSX core ($(date +%Y-%m-%d))"
           git push
+
+      - name: Build Custom Database for MiSTer Downloader
+        if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
+        run: set -o pipefail && curl --fail --location https://raw.githubusercontent.com/theypsilon/Downloader_DB-Template_MiSTer/main/.github/build_db.py | python3 -
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify result via GitHub issue
+        if: always() && steps.decide.outputs.skip == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const outcome = "${{ steps.compile.outcome }}"; // success, failure, cancelled
+            const emoji = outcome === "success" ? "✅" : "❌";
+            const sha = "${{ steps.upstream.outputs.sha }}".substring(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `${emoji} Build PSX core - upstream ${sha} - ${outcome}`,
+              body: `**Esito compilazione:** ${outcome}\n**Commit upstream:** \`${sha}\`\n**Log completo:** ${runUrl}`
+            });
