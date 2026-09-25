@@ -136,6 +136,9 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `${emoji} Build PSX core - ${filename} - ${outcome}`,
-              body: `**Esito:** ${reason}\n**Release ufficiale:** \`${filename}\`\n**Log completo:** ${runUrl}`
+              title: `${emoji} Patched PSX core - ${filename} - ${outcome}`,
+              body: `**Esito:** ${reason}\n**Release ufficiale:** \`${filename}\`\n**Log completo:** ${runUrl}`,
+              headers: {
+                'X-GitHub-Api-Version': '2022-11-28'
+              }
             });
