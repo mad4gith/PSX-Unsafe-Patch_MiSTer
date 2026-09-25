@@ -87,31 +87,48 @@ jobs:
           git push
 
       - name: Build Custom Database for MiSTer Downloader
+        id: db_json_creation
         if: (steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success') || github.event_name == 'workflow_dispatch'
         run: set -o pipefail && curl --fail --location https://raw.githubusercontent.com/theypsilon/Downloader_DB-Template_MiSTer/main/.github/build_db.py | python3 -
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify result via GitHub issue
-        if: always() && steps.decide.outputs.skip == 'false'
+        if: always() && (steps.decide.outputs.skip == 'false' || github.event_name == 'workflow_dispatch')
         uses: actions/github-script@v7
         with:
           script: |
+            const eventName = "${{ github.event_name }}";
+            const decideOutcome = "${{ steps.decide.outputs.skip }}";
             const patchOutcome = "${{ steps.apply_patch.outcome }}";
             const compileOutcome = "${{ steps.compile.outcome }}";
+            const dbJsonGenOutcome = "${{ steps.db_json_creation.outcome }}";
             const filename = "${{ steps.latest_release.outputs.filename }}";
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             let outcome, reason;
-            if (patchOutcome !== "success") {
-              outcome = "failure";
-              reason = "La patch non si applica più correttamente (probabile modifica incompatibile a monte). Serve aggiornare patches/unsafe-warning-toggle.patch.";
-            } else if (compileOutcome !== "success") {
-              outcome = "failure";
-              reason = "La patch si applica correttamente, ma la compilazione con Quartus è fallita.";
+            if (eventName == "workflow_dispatch" && decideOutcome == 'true') {
+              if (dbJsonGenOutcome !== "success") {
+                outcome = "failure";
+                reason = "Nessuna compilazione. Errore generazione db.json";
+              } else {
+                outcome = "success";
+                reason = "Nessuna compilazione. db.json creato con successo";
+              }
             } else {
-              outcome = "success";
-              reason = "Build completata con successo.";
+              if (patchOutcome !== "success") {
+                outcome = "failure";
+                reason = "La patch non si applica più correttamente (probabile modifica incompatibile a monte). Serve aggiornare patches/unsafe-warning-toggle.patch.";
+              } else if (compileOutcome !== "success") {
+                outcome = "failure";
+                reason = "La patch si applica correttamente, ma la compilazione con Quartus è fallita.";
+              } else if (dbJsonGenOutcome !== "success") {
+                outcome = "failure";
+                reason = "La patch si applica correttamente, compilazione ok, ma generazione db.json fallita.";
+              } else {
+                outcome = "success";
+                reason = "Build completata con successo.";
+              }
             }
 
             const emoji = outcome === "success" ? "✅" : "❌";
