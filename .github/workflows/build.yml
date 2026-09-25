@@ -87,7 +87,7 @@ jobs:
           git push
 
       - name: Build Custom Database for MiSTer Downloader
-        if: steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success'
+        if: (steps.decide.outputs.skip == 'false' && steps.compile.outcome == 'success') || github.event_name == 'workflow_dispatch'
         run: set -o pipefail && curl --fail --location https://raw.githubusercontent.com/theypsilon/Downloader_DB-Template_MiSTer/main/.github/build_db.py | python3 -
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
